@@ -7,32 +7,30 @@
     "test": "mocha"
   },
   "author": {
-    "name": "Alexander Kuznetsov",
-    "email": "alexander@kuznetsov.by",
-    "url": "http://kuznetsov.by/"
+    "name": "fromkeith"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/shkuznetsov/xmp-reader.git"
+    "url": "https://github.com/fromkeith/xmp-reader"
   },
-  "homepage": "https://github.com/shkuznetsov/xmp-reader",
+  "homepage": "https://github.com/fromkeith/xmp-reader",
   "license": "MIT",
   "engines": {
-    "node": ">= 4.3.2"
+    "node": ">= 16"
   },
   "keywords": [
     "jpeg",
     "jpg",
     "xmp",
     "rdf",
-	"picasa",
+    "picasa",
     "metadata"
   ],
   "devDependencies": {
-    "chai": "^3.5.0",
-    "mocha": "^3.1.2"
+    "chai": "^4.3.7",
+    "mocha": "^10.2.0"
   },
   "dependencies": {
-    "sax": "^1.2.1"
+    "fast-xml-parser": "^4.1.4"
   }
 }

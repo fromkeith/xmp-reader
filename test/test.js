@@ -9,58 +9,100 @@ describe('xmp-reader', function () {
 	let fixture = __dirname + '/fixture/test.jpg';
 	let buffer = new Buffer(65536);
 
-	let accertData = (data, done) => {
-		try {
-			expect(data.title).to.equal('Title');
-			expect(data.description).to.equal('Title');
-			expect(data.rating).to.equal(3);
-			expect(data.keywords[0]).to.equal('tag1');
-			expect(data.keywords[1]).to.equal('tag2');
-			done();
-		} catch (err) {
-			done(err);
-		};
+	const assertData = (data) => {
+		/*
+			{
+				"raw":{"x:xmpmeta":{"rdf:RDF":{"rdf:Description":["",{"MicrosoftPhoto:Rating":50},{"dc:subject":{"rdf:Bag":{"rdf:li":["tag1","tag2"]}},"dc:title":{"rdf:Alt":{"rdf:li":"Title"}},"dc:description":{"rdf:Alt":{"rdf:li":"Title"}}},{"MicrosoftPhoto:LastKeywordXMP":{"rdf:Bag":{"rdf:li":["tag1","tag2"]}}},{"xmp:Rating":3}]}}},
+				"xmp":[
+				    {
+				        "MicrosoftPhoto":
+				        {
+				            "Rating": 50
+				        }
+				    },
+				    {
+				        "dc":
+				        {
+				            "description": "Title",
+				            "subject":
+				            [
+				                "tag1",
+				                "tag2"
+				            ],
+				            "title": "Title"
+				        }
+				    },
+				    {
+				        "MicrosoftPhoto":
+				        {
+				            "LastKeywordXMP":
+				            [
+				                "tag1",
+				                "tag2"
+				            ]
+				        }
+				    },
+				    {
+				        "xmp":
+				        {
+				            "Rating": 3
+				        }
+				    }
+				]
+			}
+		*/
+		const result = xmpReader.flatten(data.xmp);
+		console.log(JSON.stringify());
+		expect(result.dc.title).to.equal('Title');
+		expect(result.dc.description).to.equal('Title');
+		expect(result.xmp.Rating).to.equal(3);
+		expect(result.MicrosoftPhoto.LastKeywordXMP[0]).to.equal('tag1');
+		expect(result.MicrosoftPhoto.LastKeywordXMP[1]).to.equal('tag2');
 	}
 
-	before(function(done) {
-		fs.open(fixture, 'r', (err, fd) => {
-			if (err) done(err);
-			else fs.read(fd, buffer, 0, 65536, 0, (err, bytesRead, buffer) => done(err))
+	before(async function() {
+		return new Promise((resolve, reject) => {
+			fs.open(fixture, 'r', (err, fd) => {
+				if (err) {
+					reject(err);
+				} else {
+					fs.read(fd, buffer, 0, 65536, 0, (err, bytesRead, buffer) => {
+						if (err) {
+							reject(err)
+						} else {
+							resolve();
+						}
+					});
+				}
+			});
 		});
 	});
 
-	it('should accept a file and a callback', function(done)	{
-		xmpReader.fromFile(fixture, (err, data) => {
-			if (err) done(err);
-			else accertData(data, done);
-		});
+	it('should accept a file and parse correctly', async function()	{
+		const data = await xmpReader.fromFile(fixture)
+		assertData(data);
 	});
 
-	it('should accept a buffer and a callback', function(done)	{
-		xmpReader.fromBuffer(buffer, (err, data) => {
-			if (err) done(err);
-			else accertData(data, done);
-		});
+	it('should fail if the file can not be read', async function()	{
+		let didParse = false;
+		try {
+			await xmpReader.fromFile('fake.txt')
+			didParse = true;
+		} catch (ex) {
+			// expected!
+		}
+		if (didParse) {
+			throw new Error('should have failed!');
+		}
 	});
 
-	it('should accept a file and return a promise', function(done)	{
-		xmpReader.fromFile(fixture).then(
-			(data) => accertData(data, done),
-			(err) => done(err)
-		);
-	});
-
-	it('should accept a buffer and return a promise', function(done)	{
-		xmpReader.fromBuffer(buffer).then(
-			(data) => accertData(data, done),
-			(err) => done(err)
-		);
-	});
-
-	it('should fail if the file can not be read', function(done)	{
-		xmpReader.fromFile(fixture + '__doesntexist').then(
-			(data) => done('Data returned'),
-			(err) => done()
-		);
+	it('should be able to parse data extracted from sharp', async function () {
+		const result = xmpReader.fromBuffer(Buffer.from('0a3c783a786d706d65746120786d6c6e733a783d2261646f62653a6e733a6d6574612f2220783a786d70746b3d2241646f626520584d5020436f726520352e312e302d6a63303033223e0a3c7264663a52444620786d6c6e733a7264663d22687474703a2f2f7777772e77332e6f72672f313939392f30322f32322d7264662d73796e7461782d6e7323223e0a3c7264663a4465736372697074696f6e207264663a61626f75743d222220786d6c6e733a4750616e6f3d22687474703a2f2f6e732e676f6f676c652e636f6d2f70686f746f732f312e302f70616e6f72616d612f223e0a3c4750616e6f3a55736550616e6f72616d615669657765723e547275653c2f4750616e6f3a55736550616e6f72616d615669657765723e0a3c4750616e6f3a43617074757265536f6674776172653e476f50726f204d61783c2f4750616e6f3a43617074757265536f6674776172653e0a3c4750616e6f3a537469746368696e67536f6674776172653e476f50726f204d61783c2f4750616e6f3a537469746368696e67536f6674776172653e0a3c4750616e6f3a50726f6a656374696f6e547970653e6571756972656374616e67756c61723c2f4750616e6f3a50726f6a656374696f6e547970653e0a3c4750616e6f3a506f736548656164696e67446567726565733e302e303c2f4750616e6f3a506f736548656164696e67446567726565733e0a3c4750616e6f3a506f73655069746368446567726565733e302e303c2f4750616e6f3a506f73655069746368446567726565733e0a3c4750616e6f3a506f7365526f6c6c446567726565733e302e303c2f4750616e6f3a506f7365526f6c6c446567726565733e0a3c4750616e6f3a496e697469616c5669657748656164696e67446567726565733e302e303c2f4750616e6f3a496e697469616c5669657748656164696e67446567726565733e0a3c4750616e6f3a496e697469616c566965775069746368446567726565733e302e303c2f4750616e6f3a496e697469616c566965775069746368446567726565733e0a3c4750616e6f3a496e697469616c56696577526f6c6c446567726565733e302e303c2f4750616e6f3a496e697469616c56696577526f6c6c446567726565733e0a3c4750616e6f3a496e697469616c486f72697a6f6e74616c464f56446567726565733e302e303c2f4750616e6f3a496e697469616c486f72697a6f6e74616c464f56446567726565733e0a3c4750616e6f3a496e697469616c566572746963616c464f56446567726565733e302e303c2f4750616e6f3a496e697469616c566572746963616c464f56446567726565733e0a3c4750616e6f3a43726f70706564417265614c656674506978656c733e3732303c2f4750616e6f3a43726f70706564417265614c656674506978656c733e0a3c4750616e6f3a43726f7070656441726561546f70506978656c733e3732303c2f4750616e6f3a43726f7070656441726561546f70506978656c733e0a3c4750616e6f3a43726f7070656441726561496d6167655769647468506978656c733e343332303c2f4750616e6f3a43726f7070656441726561496d6167655769647468506978656c733e0a3c4750616e6f3a43726f7070656441726561496d616765486569676874506978656c733e313434303c2f4750616e6f3a43726f7070656441726561496d616765486569676874506978656c733e0a3c4750616e6f3a46756c6c50616e6f5769647468506978656c733e353736303c2f4750616e6f3a46756c6c50616e6f5769647468506978656c733e0a3c4750616e6f3a46756c6c50616e6f486569676874506978656c733e323838303c2f4750616e6f3a46756c6c50616e6f486569676874506978656c733e0a3c4750616e6f3a466972737450686f746f446174653e323032333a30333a31352030383a32383a30333c2f4750616e6f3a466972737450686f746f446174653e0a3c4750616e6f3a4c61737450686f746f446174653e323032333a30333a31352030383a32383a30333c2f4750616e6f3a4c61737450686f746f446174653e0a3c4750616e6f3a536f7572636550686f746f73436f756e743e323c2f4750616e6f3a536f7572636550686f746f73436f756e743e0a3c4750616e6f3a4578706f737572654c6f636b557365643e46616c73653c2f4750616e6f3a4578706f737572654c6f636b557365643e0a3c4750616e6f3a496e697469616c43616d657261446f6c6c793e302e303c2f4750616e6f3a496e697469616c43616d657261446f6c6c793e0a3c2f7264663a4465736372697074696f6e3e0a3c2f7264663a5244463e0a3c2f783a786d706d6574613e', 'hex'));
+		const data = xmpReader.flatten(result.xmp);
+		// console.log(data);
+		expect(data.GPano).to.exist;
+		expect(data.GPano.UsePanoramaViewer).to.equal('True');
+		expect(data.GPano.ProjectionType).to.equal('equirectangular');
+		expect(data.GPano.FullPanoWidthPixels).to.equal(5760);
 	});
 });

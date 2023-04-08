@@ -1,130 +1,129 @@
 'use strict';
 
+const {XMLParser} = require('fast-xml-parser');
+const fs = require('fs').promises;
+
 const markerBegin = '<x:xmpmeta';
 const markerEnd = '</x:xmpmeta>';
 
-const bufferLimit = 65536;
+function print(depth, ...what) {
+	// console.log((new Array(depth)).join('-'), ...what);
+}
 
-const knownTags = [
-	'MicrosoftPhoto:LastKeywordXMP',
-	'MicrosoftPhoto:LastKeywordIPTC',
-	'MicrosoftPhoto:Rating',
-	'Iptc4xmpCore:Location',
-	'xmp:Rating',
-	'dc:title',
-	'dc:description',
-	'dc:creator',
-	'dc:subject',
-	'dc:rights',
-	'cc:attributionName'
-];
-
-const envelopeTags = [
-	'rdf:Bag',
-	'rdf:Alt',
-	'rdf:Seq',
-	'rdf:li'
-];
-
-let fs = require('fs');
-
-let bufferToPromise = (buffer) => new Promise((resolve, reject) => {
-	if (!Buffer.isBuffer(buffer)) reject('Not a Buffer');
-	else {
-		let data = {raw: {}};
-		let offsetBegin = buffer.indexOf(markerBegin);
-		if (offsetBegin) {
-			let offsetEnd = buffer.indexOf(markerEnd);
-			if (offsetEnd) {
-				let xmlBuffer = buffer.slice(offsetBegin, offsetEnd + markerEnd.length);
-				let parser = require('sax').parser(true);
-				let nodeName;
-
-				parser.onerror = (err) => reject(err);
-				parser.onend = () => resolve(data);
-
-				parser.onopentag = function (node) {
-					if (knownTags.indexOf(node.name) != -1) nodeName = node.name;
-					else if (envelopeTags.indexOf(node.name) == -1) nodeName = null;
-				};
-
-				parser.ontext = function(text) {
-					if (text.trim() != '') switch (nodeName) {
-						case 'MicrosoftPhoto:LastKeywordXMP':
-						case 'MicrosoftPhoto:LastKeywordIPTC':
-							if (!data.raw[nodeName]) data.raw[nodeName] = [text];
-							else if (data.raw[nodeName].indexOf(text) == -1) data.raw[nodeName].push(text);
-							if (!data.keywords) data.keywords = [text];
-							else if (data.keywords.indexOf(text) == -1) data.keywords.push(text);
-							break;
-						case 'dc:title':
-							data.raw[nodeName] = text;
-							data.title = text;
-							break;
-						case 'dc:description':
-							data.raw[nodeName] = text;
-							data.description = text;
-							break;
-						case 'xmp:Rating':
-							data.raw[nodeName] = text;
-							data.rating = parseInt(text);
-							break;
-						case 'MicrosoftPhoto:Rating':
-							data.raw[nodeName] = text;
-							data.rating = Math.floor(parseInt(text) + 12 / 25) + 1;
-							break;
-						case 'Iptc4xmpCore:Location':
-							data.raw[nodeName] = text;
-							data.location = text;
-							break;
-						case 'dc:creator':
-							data.raw[nodeName] = text;
-							data.creator = text;
-							break;
-						case 'dc:subject':
-							data.raw[nodeName] = text;
-							data.subject = text;
-							break;
-						case 'cc:attributionName':
-							data.raw[nodeName] = text;
-							data.attribution = text;
-							break;
-						case 'xmpRights:UsageTerms':
-						case 'dc:rights':
-							data.raw[nodeName] = text;
-							data.terms = text;
-							break;
-					}
-				};
-
-				parser.write(xmlBuffer.toString('utf-8', 0, xmlBuffer.length)).close();
-			}
-			else resolve(data);
+function extractValue(val, depth) {
+	if (Array.isArray(val)) {
+		print(depth, 'array', val)
+		const out = [];
+		for (const item of val) {
+			out.push(extractValue(item, depth + 1));
 		}
-		else resolve(data);
+		return out;
+	} else if (typeof val === 'object') {
+		print(depth, 'object')
+		return parseObject(val, depth + 1);
 	}
-});
+	print(depth, 'value', val)
+	return val;
+}
 
-let fileToBuffer = (file) => new Promise((resolve, reject) => {
-	fs.open(file, 'r', (err, fd) => {
-		if (err) reject(err);
-		else {
-			let buffer = new Buffer(bufferLimit);
-			fs.read(fd, buffer, 0, bufferLimit, 0, (err, bytesRead, buffer) => {
-				if (err) reject(err);
-				else resolve(buffer);
-			});
+function parseObject(xmlRoot, depth) {
+	print(depth, 'parseObject');
+	const keys = Object.keys(xmlRoot);
+	if (keys.length === 1) {
+		print(depth, 'keys === 1', keys[0], JSON.stringify(xmlRoot));
+		// object wrapper
+		if (keys[0] === 'rdf:Bag') {
+			return parseObject(xmlRoot[keys[0]], depth + 1);
 		}
-	});
-});
+		// list wrapper
+		if (keys[0] === 'rdf:li' || keys[0] === 'rdf:Alt') {
+			return extractValue(xmlRoot[keys[0]], depth + 1);
+		}
+	}
+	let obj = {};
+	for (const k of keys) {
+		if (!k) {
+			continue;
+		}
+		const keyParts = k.split(':');
+		const prefix = keyParts[0];
+		const suffix = keyParts[1];
+		if (!obj[prefix]) {
+			obj[prefix] = {};
+		}
+		print(depth, 'keyloop', prefix, suffix);
+		obj[prefix][suffix] = extractValue(xmlRoot[k], depth + 1);
+	}
+	if (Object.keys(obj).length === 0) {
+		return null;
+	}
+	return obj;
+}
 
-let promiseToCallback = (promise, callback) => {
-	if ('function' == typeof callback) promise.then(
-		(data) => callback(null, data),
-		(error) => callback(error)
-	);
-	return promise;
+/*
+	Expects of a buffer of the XMP data directly
+*/
+function fromBuffer(buffer) {
+	if (!Buffer.isBuffer(buffer)) {
+		throw new Error('Not a Buffer');
+	}
+	// sharp can give us 0x0a at the start of buffer, which is whitespace..
+	let offsetBegin = 0;
+	if (buffer[0] === 0x0a) {
+		offsetBegin++;
+	}
+
+	if (buffer.toString('ascii', offsetBegin, markerBegin.length + offsetBegin) !== markerBegin) {
+		throw new Error(`Invalid XMP data. Buffer should start with ${markerBegin}`);
+	}
+	if (buffer.toString('ascii', buffer.length - markerEnd.length, buffer.length) !== markerEnd) {
+		throw new Error(`Invalid XMP data. Buffer should end with ${markerEnd}`);
+	}
+
+	const parser = new XMLParser();
+	const raw = parser.parse(buffer.toString('utf-8', offsetBegin, buffer.length));
+	// https://printtechnologies.org/wp-content/uploads/2020/03/xmp-specification-sep05_fileticketd5JLj1avaKctabid158mid669.pdf
+	// page 22
+	// <x:xmpmeta><rdf:RDF>
+	// 	then 0 or more <rdf:Description> objects
+	if (!raw['x:xmpmeta'] || !raw['x:xmpmeta']['rdf:RDF']) {
+		throw new Error('Invalid structure');
+	}
+	let descriptions = [];
+	if (!Array.isArray(raw['x:xmpmeta']['rdf:RDF']['rdf:Description'])) {
+		descriptions = [raw['x:xmpmeta']['rdf:RDF']['rdf:Description']];
+	} else {
+		descriptions = raw['x:xmpmeta']['rdf:RDF']['rdf:Description'];
+	}
+	const rows = [];
+	for (const desc of descriptions) {
+		const r = parseObject(desc, 0);
+		if (!r) {
+			continue;
+		}
+		rows.push(r);
+	}
+	return {
+		raw,
+		xmp: rows,
+	};
+}
+
+function flatten(xmp) {
+	return Object.assign({}, ...xmp);
+}
+
+async function fromFile(file) {
+	const buffer = await fs.readFile(file);
+	const start = buffer.indexOf(markerBegin);
+	const end = buffer.indexOf(markerEnd);
+	const s = buffer.subarray(start, end + markerEnd.length);
+	return fromBuffer(s);
+}
+
+
+module.exports = {
+	fromBuffer,
+	fromFile,
+	flatten,
 };
-
-module.exports.fromBuffer = (buffer, callback) => promiseToCallback(bufferToPromise(buffer), callback);
-module.exports.fromFile = (filename, callback) => promiseToCallback(fileToBuffer(filename).then(bufferToPromise), callback);
